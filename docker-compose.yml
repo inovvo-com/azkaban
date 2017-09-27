@@ -1,37 +1,49 @@
-version: '3'
-services: 
+version: '3.1'
+services:
     mysql:
         image: mysql:5.7
+        expose:
+            - 3306
         ports:
             - "3306:3306"
         environment: &environment_mysql
             - MYSQL_ROOT_PASSWORD=my-secret-pw
-        command: mysqld --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
-        volumes: 
-            - ./data/app/mysql/data:/var/lib/mysql
+        command: mysqld --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --lower_case_table_names=1
+        volumes:
+            - ./data/app/mysql/data/:/var/lib/mysql/
+        networks:
+            azkaban-network0:
+                ipv4_address: "172.20.0.2"
 
     azkaban-dbinstaller:
         image: inovvo/azkaban-dbinstaller:3.32.1
         #build: azkaban-dbinstaller
         #restart: none
         volumes:
-            - ./data/app/azkaban/conf/:/azkaban/conf
+            - ./data/app/azkaban/conf/:/azkaban/conf/
             - azkaban-boot:/tmp/boot/
         environment: *environment_mysql
         command: bash -c "rm -f /tmp/boot/*.flag && python importdb.py && touch /tmp/boot/azkaban-exec.flag"
+        networks:
+            azkaban-network0:
+                ipv4_address: "172.20.0.3"
 
     azkaban-exec:
         image: inovvo/azkaban-exec:3.32.1
         depends_on:
             - azkaban-dbinstaller
         restart: always
-        ports:
-            - 12321:12321
+        expose:
+            - 12321
         volumes:
-            - ./data/app/azkaban/:/azkaban/
+            - ./data/app/azkaban/conf/:/azkaban/conf/
+            - ./data/app/azkaban/:/datadock/app/azkaban/
             - azkaban-boot:/tmp/boot/
         restart: on-failure
         command: bash -c " while [ ! -f /tmp/boot/azkaban-exec.flag ]; do sleep 2; done && bin/azkaban-executor-start.sh && sleep 10 && touch /tmp/boot/azkaban-web.flag && tail --pid=`cat currentpid` -f /dev/null"
+        networks:
+            azkaban-network0:
+                ipv4_address: "172.20.0.4"
 
     azkaban-web:
         image: inovvo/azkaban-web:3.32.1
@@ -42,10 +54,20 @@ services:
             - 8081:8081
             - 8443:8443
         volumes:
-            - ./data/app/azkaban/conf/:/azkaban/conf
+            - ./data/app/azkaban/conf/:/azkaban/conf/
             - azkaban-boot:/tmp/boot
         command: bash -c " while [ ! -f /tmp/boot/azkaban-web.flag ]; do sleep 2; done && bin/azkaban-web-start.sh && tail --pid=`cat currentpid` -f /dev/null"
+        networks:
+            azkaban-network0:
+                ipv4_address: "172.20.0.5"
 
 volumes:
     azkaban-boot: {}
 
+networks:
+    azkaban-network0:
+        driver: bridge
+        ipam:
+            driver: default
+            config:
+            - subnet: "172.20.0.0/16"
